@@ -11,28 +11,28 @@ import io.shiftleft.codepropertygraph.generated.DiffGraphBuilder
 
 import scala.collection.{Set, mutable}
 
-/** Creation of data dependence edges based on solution of the ReachingDefProblem.
-  */
+/** 基于ReachingDefProblem的解决方案创建数据依赖边。
+ */
 class DdgGenerator(semantics: Semantics) {
 
   implicit val s: Semantics = semantics
 
-  /** Once reaching definitions have been computed, we create a data dependence graph by checking which reaching
-    * definitions are relevant, meaning that a symbol is propagated that is used by the target node.
-    *
-    * @param dstGraph
-    *   the diff graph to add edges to
-    * @param problem
-    *   the reaching definition problem
-    * @param solution
-    *   the solution to `problem`
-    */
+  /** 一旦计算出到达定义，我们通过检查哪些到达定义是相关的来创建数据依赖图，
+   * 这意味着符号被传播并且被目标节点使用。
+   *
+   * @param dstGraph
+   *   要添加边的差异图
+   * @param problem
+   *   到达定义问题
+   * @param solution
+   *   问题的解决方案
+   */
   def addReachingDefEdges(
-    dstGraph: DiffGraphBuilder,
-    method: Method,
-    problem: DataFlowProblem[StoredNode, mutable.BitSet],
-    solution: Solution[StoredNode, mutable.BitSet]
-  ): Unit = {
+                           dstGraph: DiffGraphBuilder,
+                           method: Method,
+                           problem: DataFlowProblem[StoredNode, mutable.BitSet],
+                           solution: Solution[StoredNode, mutable.BitSet]
+                         ): Unit = {
     implicit val implicitDst: DiffGraphBuilder = dstGraph
 
     val numberToNode = problem.flowGraph.asInstanceOf[ReachingDefFlowGraph].numberToNode
@@ -42,10 +42,10 @@ class DdgGenerator(semantics: Semantics) {
     val allNodes      = in.keys.toList
     val usageAnalyzer = new UsageAnalyzer(problem, in)
 
-    /** Add an edge from the entry node to each node that does not have other incoming definitions.
-      */
+    /** 从入口节点到每个没有其他传入定义的节点添加边。
+     */
     def addEdgesFromEntryNode(): Unit = {
-      // Add edges from the entry node
+      // 从入口节点添加边
       allNodes
         .filter(n => isDdgNode(n) && usageAnalyzer.usedIncomingDefs(n).isEmpty)
         .foreach { node =>
@@ -53,10 +53,10 @@ class DdgGenerator(semantics: Semantics) {
         }
     }
 
-    // This handles `foo(new Bar()) or return new Bar()`
+    // 处理 `foo(new Bar()) or return new Bar()`
     def addEdgeForBlock(block: Block, towards: StoredNode): Unit = {
       block.astChildren.lastOption match {
-        case None => // Do nothing
+        case None => // 不做处理
         case Some(node: Identifier) =>
           val edgesToAdd = in(node).toList
             .flatMap(numberToNode.get)
@@ -74,14 +74,14 @@ class DdgGenerator(semantics: Semantics) {
         case Some(node: Call) =>
           addEdge(node, block, nodeToEdgeLabel(node))
           addEdge(block, towards)
-        case _ => // Do nothing
+        case _ => // 不做处理
       }
     }
 
-    /** Adds incoming edges to arguments of call sites, including edges between arguments of the same call site.
-      */
+    /** 添加传入边到调用站点的参数，包括同一调用站点的参数之间的边。
+     */
     def addEdgesToCallSite(call: Call): Unit = {
-      // Edges between arguments of call sites
+      // 调用站点参数之间的边
       usageAnalyzer.usedIncomingDefs(call).foreach { case (use, ins) =>
         ins.foreach { in =>
           val inNode = numberToNode(in)
@@ -91,10 +91,9 @@ class DdgGenerator(semantics: Semantics) {
         }
       }
 
-      // For all calls, assume that input arguments
-      // taint corresponding output arguments
-      // and the return value. We filter invalid
-      // edges at query time (according to the given semantic).
+      // 对于所有调用，假设输入参数
+      // 污染相应的输出参数
+      // 和返回值。我们在查询时根据给定的语义过滤无效的边。
       usageAnalyzer.uses(call).foreach { use =>
         gen(call).foreach { g =>
           val genNode = numberToNode(g)
@@ -104,13 +103,13 @@ class DdgGenerator(semantics: Semantics) {
         }
       }
 
-      // This handles `foo(new Bar())`, which is lowered to
+      // 处理 `foo(new Bar())`，被降低为
       // `foo({Bar tmp = Bar.alloc(); tmp.init(); tmp})`
       call.argument.isBlock.foreach { block => addEdgeForBlock(block, call) }
     }
 
     def addEdgesToReturn(ret: Return): Unit = {
-      // This handles `return new Bar()`, which is lowered to
+      // 处理 `return new Bar()`，被降低为
       // `return {Bar tmp = Bar.alloc(); tmp.init(); tmp}`
       usageAnalyzer.uses(ret).collectAll[Block].foreach(block => addEdgeForBlock(block, ret))
       usageAnalyzer.usedIncomingDefs(ret).foreach { case (use: CfgNode, inElements) =>
@@ -129,9 +128,8 @@ class DdgGenerator(semantics: Semantics) {
     }
 
     def addEdgesToMethodParameterOut(paramOut: MethodParameterOut): Unit = {
-      // There is always an edge from the method input parameter
-      // to the corresponding method output parameter as modifications
-      // of the input parameter only affect a copy.
+      // 总是有一条边从方法输入参数到相应的方法输出参数，
+      // 因为输入参数的修改只影响副本。
       paramOut.start.paramIn.foreach { paramIn =>
         addEdge(paramIn, paramOut, paramIn.name)
       }
@@ -151,9 +149,9 @@ class DdgGenerator(semantics: Semantics) {
       }
     }
 
-    /** This is part of the Lone-identifier optimization: as we remove lone identifiers from `gen` sets, we must now
-      * retrieve them and create an edge from each lone identifier to the exit node.
-      */
+    /** 这是孤立标识符优化的一部分：由于我们从 `gen` 集合中删除了孤立标识符，
+     * 我们现在必须检索它们并创建从每个孤立标识符到出口节点的边。
+     */
     def addEdgesFromLoneIdentifiersToExit(method: Method): Unit = {
       val numberToNode     = problem.flowGraph.asInstanceOf[ReachingDefFlowGraph].numberToNode
       val exitNode         = method.methodReturn
@@ -186,10 +184,10 @@ class DdgGenerator(semantics: Semantics) {
         }
       }
 
-      // NOTE: Below connects REACHING_DEF edges between method boundaries of closures. In the case of PARENT -> CHILD
-      // this brings no inconsistent flows, but from CHILD -> PARENT we have observed inconsistencies. This form of
-      // modelling data-flow is unsound as the engine assumes REACHING_DEF edges are intraprocedural.
-      // See PR #3735 on Joern for details
+      // 注意：以下连接闭包的方法边界之间的REACHING_DEF边。在PARENT -> CHILD的情况下，
+      // 这不会带来不一致的流，但从CHILD -> PARENT我们观察到了不一致。这种数据流建模是不健全的，
+      // 因为引擎假设REACHING_DEF边是过程内的。
+      // 详情请参见Joern的PR #3735
       val globalIdentifiers =
         (method._callViaContainsOut ++ method._returnViaContainsOut).ast.isLiteral
           .flatMap(globalFromLiteral(_))
@@ -203,6 +201,7 @@ class DdgGenerator(semantics: Semantics) {
         }
     }
 
+    // 添加从入口节点的边
     addEdgesFromEntryNode()
     allNodes.foreach {
       case call: Call                   => addEdgesToCallSite(call)
@@ -211,18 +210,23 @@ class DdgGenerator(semantics: Semantics) {
       case _                            =>
     }
 
+    // 添加到捕获的标识符和参数的边
     addEdgesToCapturedIdentifiersAndParameters()
+    // 添加到出口节点的边
     addEdgesToExitNode(method.methodReturn)
+    // 添加从孤立标识符到出口的边
     addEdgesFromLoneIdentifiersToExit(method)
   }
 
   private def addEdge(fromNode: StoredNode, toNode: StoredNode, variable: String = "")(implicit
-    dstGraph: DiffGraphBuilder
+                                                                                       dstGraph: DiffGraphBuilder
   ): Unit = {
+    // 如果起始节点或目标节点是未知类型，则直接返回
     if (fromNode.isInstanceOf[Unknown] || toNode.isInstanceOf[Unknown])
       return
 
     (fromNode, toNode) match {
+      // 如果子节点和父节点之间的边是有效的，则添加边
       case (parentNode: CfgNode, childNode: CfgNode) if EdgeValidator.isValidEdge(childNode, parentNode) =>
         dstGraph.addEdge(fromNode, toNode, EdgeTypes.REACHING_DEF, variable)
       case _ =>
@@ -230,10 +234,9 @@ class DdgGenerator(semantics: Semantics) {
     }
   }
 
-  /** There are a few node types that (a) are not to be considered in the DDG, or (b) are not standalone DDG nodes, or
-    * (c) have a special meaning in the DDG. This function indicates whether the given node is just a regular DDG node
-    * instead.
-    */
+  /** 有一些节点类型 (a) 不应被视为DDG的一部分，或 (b) 不是独立的DDG节点，或
+   * (c) 在DDG中有特殊意义。此函数指示给定节点是否为常规DDG节点。
+   */
   private def isDdgNode(x: StoredNode): Boolean = {
     x match {
       case _: Method           => false
@@ -254,14 +257,13 @@ class DdgGenerator(semantics: Semantics) {
   }
 }
 
-/** Upon calculating reaching definitions, we find ourselves with a set of incoming definitions `in(n)` for each node
-  * `n` of the flow graph. This component determines those of the incoming definitions that are relevant as the value
-  * they define is actually used by `n`.
-  */
+/** 在计算到达定义之后，我们会得到每个流图节点 `n` 的传入定义集合 `in(n)`。
+ * 这个组件确定那些传入定义是相关的，因为它们定义的值实际上被 `n` 使用。
+ */
 private class UsageAnalyzer(
-  problem: DataFlowProblem[StoredNode, mutable.BitSet],
-  in: Map[StoredNode, Set[Definition]]
-) {
+                             problem: DataFlowProblem[StoredNode, mutable.BitSet],
+                             in: Map[StoredNode, Set[Definition]]
+                           ) {
 
   val numberToNode: Map[Definition, StoredNode] = problem.flowGraph.asInstanceOf[ReachingDefFlowGraph].numberToNode
 
@@ -289,9 +291,8 @@ private class UsageAnalyzer(
   def isUsing(use: StoredNode, inElemNode: StoredNode): Boolean =
     sameVariable(use, inElemNode) || isContainer(use, inElemNode) || isPart(use, inElemNode) || isAlias(use, inElemNode)
 
-  /** Determine whether the node `use` describes a container for `inElement`, e.g., use = `ptr` while inElement =
-    * `ptr->foo`.
-    */
+  /** 确定节点 `use` 是否描述 `inElement` 的容器，例如，use = `ptr` 而 inElement = `ptr->foo`。
+   */
   private def isContainer(use: StoredNode, inElement: StoredNode): Boolean = {
     inElement match {
       case call: Call if containerSet.contains(call.name) =>
@@ -302,8 +303,8 @@ private class UsageAnalyzer(
     }
   }
 
-  /** Determine whether `use` is a part of `inElement`, e.g., use = `argv[0]` while inElement = `argv`
-    */
+  /** 确定 `use` 是否是 `inElement` 的一部分，例如，use = `argv[0]` 而 inElement = `argv`
+   */
   private def isPart(use: StoredNode, inElement: StoredNode): Boolean = {
     use match {
       case call: Call if containerSet.contains(call.name) =>
@@ -346,8 +347,8 @@ private class UsageAnalyzer(
     n.filterNot(_.isInstanceOf[FieldIdentifier])
   }
 
-  /** Compares arguments of calls with incoming definitions to see if they refer to the same variable
-    */
+  /** 将调用的参数与传入定义进行比较，以查看它们是否引用同一个变量
+   */
   private def sameVariable(use: StoredNode, inElement: StoredNode): Boolean = {
     inElement match {
       case param: MethodParameterIn =>
@@ -370,5 +371,4 @@ private class UsageAnalyzer(
       case _                     => None
     }
   }
-
 }
